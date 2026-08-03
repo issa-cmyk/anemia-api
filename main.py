@@ -51,7 +51,8 @@ except Exception:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def pil_from_bytes(data: bytes) -> np.ndarray:
-    pil = Image.open(io.BytesIO(data)).convert("RGB")
+    from PIL import ImageOps
+    pil = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
     return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
 def extract_nail_features(img_bgr, poly):
