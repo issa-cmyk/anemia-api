@@ -66,6 +66,10 @@ def _try_load_best_unet() -> bool:
 def _preprocess_for_best_unet(img_bgr: np.ndarray):
     """Inpainting reflets + CLAHE + normalisation ImageNet → tensor (1,3,H,W)."""
     import torch
+    h, w = img_bgr.shape[:2]
+    if max(h, w) > 512:
+        scale = 512 / max(h, w)
+        img_bgr = cv2.resize(img_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     # Inpainting reflets spéculaires
     spec_mask = np.all(img_bgr > 240, axis=2).astype(np.uint8)
     if spec_mask.sum() > 0:
@@ -95,7 +99,7 @@ def _segment_with_best_unet(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray
         tensor = _preprocess_for_best_unet(img_bgr)
         with torch.no_grad():
             prob = torch.sigmoid(_BEST_UNET_MODEL(tensor)).squeeze().numpy()
-        pred_256 = (prob > 0.5).astype(np.uint8) * 255
+        pred_256 = (prob > 0.4).astype(np.uint8) * 255
         mask     = cv2.resize(pred_256, (w, h), interpolation=cv2.INTER_NEAREST)
         # Garder uniquement le plus grand composant connexe
         n_lbl, lbl_map, stats, _ = cv2.connectedComponentsWithStats(mask, 4)
@@ -104,7 +108,7 @@ def _segment_with_best_unet(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray
             mask = (lbl_map == best_lbl).astype(np.uint8) * 255
         n_px = int((mask > 0).sum())
         fill = float(n_px / (h * w) * 100)
-        if n_px < 300 or fill < 0.3:
+        if n_px < 100 or fill < 0.1:
             return None
         roi_bgr = img_bgr.copy()
         roi_bgr[mask == 0] = 0
