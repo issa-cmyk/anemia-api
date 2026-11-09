@@ -1,23 +1,11 @@
 FROM python:3.11-slim
-
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y \
-    libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 wget \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
 COPY . .
-
-# Télécharge les modèles depuis Hugging Face
-RUN wget -q -O /app/best_unet.pt \
-    "https://huggingface.co/pk180/anemia-models/resolve/main/best_unet.pt"
-
-RUN wget -q -O /app/model_aL_demo.pkl \
-    "https://huggingface.co/pk180/anemia-models/resolve/main/model_aL_demo.pkl"
-
+# Weights are downloaded at build time so the container starts offline.
+RUN python -c "from anemia_eye import download_weights; download_weights()"
 EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

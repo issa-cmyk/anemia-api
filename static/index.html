@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yako eye screening</title>
+<style>
+  :root { --ink:#18261f; --muted:#5b6b62; --line:#d9e0db; --bg:#f6f8f6; --card:#fff; --accent:#1d4632;
+          --green:#2f7d55; --orange:#c47a12; --red:#b23a2b; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif }
+  main { max-width:560px; margin:0 auto; padding:20px 16px 48px; display:flex; flex-direction:column; gap:14px }
+  h1 { margin:0; font-size:22px; color:var(--accent) }
+  p { margin:0; color:var(--muted) }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px }
+  .stage { position:relative; border-radius:12px; overflow:hidden; background:#000; aspect-ratio:3/4 }
+  @media (min-width:700px) { .stage { aspect-ratio:4/3 } }
+  .stage video { width:100%; height:100%; object-fit:cover; display:block }
+  .stage video.mirror { transform:scaleX(-1) }
+  /* Target band where the pink inner eyelid should be: same place and size as in the Yako app,
+     the live checks below measure exactly this area. */
+  .guide { position:absolute; left:50%; top:58%; width:40%; aspect-ratio:2/1; transform:translate(-50%,-50%);
+           border:3px solid rgba(255,255,255,.9); border-radius:50%; box-shadow:0 0 0 999px rgba(0,0,0,.35);
+           transition:border-color .2s }
+  .guide.ok { border-color:#5ee09a }
+  .hint { position:absolute; left:10px; right:10px; top:10px; text-align:center; color:#fff; font-size:15px; font-weight:600;
+          padding:8px 10px; border-radius:10px; background:rgba(0,0,0,.45) }
+  .hint.ok { background:rgba(29,110,64,.85) }
+  .count { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff;
+           font-size:96px; font-weight:800; text-shadow:0 2px 12px rgba(0,0,0,.6); pointer-events:none }
+  .done { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(24,38,31,.82);
+          color:#fff; font-size:20px; font-weight:700; text-align:center; padding:16px }
+  .row { display:flex; gap:8px }
+  button, .pick { flex:1; border:0; border-radius:10px; padding:13px; font:inherit; font-weight:600; cursor:pointer; text-align:center }
+  .main { background:var(--accent); color:#fff }
+  .sec { background:#e6ece8; color:var(--ink) }
+  button:focus-visible, .pick:focus-within { outline:3px solid #8fc1a6; outline-offset:2px }
+  .link { background:none; color:var(--accent); text-decoration:underline; font-weight:400; padding:4px; flex:none; align-self:center }
+  input[type=file] { position:absolute; opacity:0; width:1px; height:1px }
+  img { max-width:100%; border-radius:10px; display:block }
+  .verdict { font-size:20px; font-weight:700 }
+  .green { color:var(--green) } .orange { color:var(--orange) } .red { color:var(--red) }
+  .small { font-size:13px; color:var(--muted) }
+  .verdict { font-size:28px }
+  .gauge { position:relative; display:flex; height:12px; border-radius:6px }
+  .seg.green { background:var(--green); border-radius:6px 0 0 6px } .seg.orange { background:var(--orange) } .seg.red { background:var(--red); border-radius:0 6px 6px 0 }
+  .mark { position:absolute; top:-6px; width:6px; height:24px; border-radius:3px; background:var(--ink); transform:translateX(-50%); box-shadow:0 0 0 2px var(--card) }
+  .legend { display:flex; font-size:12px; color:var(--muted) } .legend span { text-align:center }
+  .measures { display:grid; grid-template-columns:1fr auto; gap:8px 16px; margin:0; padding:12px 14px; border-radius:12px; background:var(--bg) }
+  .measures dt { color:var(--muted) } .measures dd { margin:0; font-weight:700; text-align:right; font-variant-numeric:tabular-nums }
+  .measures .explain { grid-column:1/-1; font-size:13px; font-weight:400; color:var(--muted); text-align:left }
+  ol { margin:0; padding-left:20px; color:var(--muted) }
+  [hidden] { display:none !important }
+  @media (prefers-reduced-motion: reduce) { .guide { transition:none } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Anemia screening from an eye photo</h1>
+  <p>Research prototype for triage, not a diagnosis. Only a blood test measures hemoglobin.</p>
+
+  <div class="card">
+    <ol>
+      <li>Face a window or a bright light, no flash.</li>
+      <li>Pull the lower eyelid down with one finger to show the pink inner part.</li>
+      <li>Place the pink part inside the oval and hold still: the photo takes itself.</li>
+    </ol>
+
+    <div id="camera">
+      <div class="stage" id="stage">
+        <video id="video" class="mirror" autoplay playsinline muted></video>
+        <div class="guide" id="guide" aria-hidden="true"></div>
+        <div class="hint" id="hint" role="status" aria-live="polite">Opening the camera…</div>
+        <div class="count" id="count" hidden aria-live="assertive"></div>
+        <div class="done" id="done" hidden>Photos taken, thank you!<br>Analysing…</div>
+      </div>
+    </div>
+
+    <div class="row" id="controls">
+      <button class="main" id="shoot" type="button" hidden>Take the photo now</button>
+    </div>
+    <!-- Fallback when the live camera is not available (no camera, permission refused, or page not on https). -->
+    <label class="pick main" id="fallback" hidden>Take or choose a photo
+      <input id="file" type="file" accept="image/*" capture="user">
+    </label>
+    <button class="link" id="choose" type="button">Or choose an existing photo</button>
+  </div>
+
+  <div class="card" id="out" hidden></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const out = $('out'), video = $('video');
+// Same words and thresholds as the Yako app: green < 0.40 ≤ orange < 0.65 ≤ red.
+const LEVEL = { green: ['Low', "No blood test needed for now, unless there are symptoms or a pregnancy."],
+                orange: ['Moderate', 'A blood test is advised to measure hemoglobin.'],
+                red: ['High', 'A blood test is strongly advised, as soon as possible.'] };
+let stream = null, busy = false;
+
+async function openCamera() {
+  stopCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return noCamera(
+    window.isSecureContext ? 'No camera on this device.' : 'The live camera needs https (or localhost).');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  } catch (e) {
+    return noCamera(e.name === 'NotAllowedError' ? 'Camera access was refused.' : 'The camera could not be opened.');
+  }
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  $('camera').hidden = false; $('controls').hidden = false; $('fallback').hidden = true; $('done').hidden = true;
+  guide();
+}
+function stopCamera() { stopGuide(); if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
+function noCamera(why) {
+  $('camera').hidden = true; $('controls').hidden = true; $('choose').hidden = true;
+  $('fallback').hidden = false; $('fallback').firstChild.textContent = `${why} Take or choose a photo `;
+}
+
+/* ---------- live guidance: the photo takes itself when everything is right ----------
+   Several times per second, inside the oval only: enough light, no glare, a still image, the pink
+   inner eyelid visible, a sharp image. Nothing is sent to the server meanwhile. Same measures and
+   thresholds as the Yako app, calibrated on 478 annotated photos of 86 patients. */
+let timer = null, ready = 0, bad = 0, counting = false, previous = null, openedAt = 0, recent = [], pinkSeen = false;
+const box = document.createElement('canvas'), bctx = box.getContext('2d', { willReadFrequently: true });
+function targetArea() {
+  const st = $('stage'), sw = st.clientWidth, sh = st.clientHeight, vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const e = Math.max(sw / vw, sh / vh), ox = (sw - vw * e) / 2, oy = (sh - vh * e) / 2;   // object-fit: cover
+  const w = 0.40 * sw, h = w / 2, cx = 0.5 * sw, cy = 0.58 * sh;
+  return { x: (cx - w / 2 - ox) / e, y: (cy - h / 2 - oy) / e, w: w / e, h: h / e };
+}
+// CIELAB a* (green-red axis) with OpenCV's formulas: the thresholds were calibrated on it.
+const LIN = new Float32Array(256).map((_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+const fLab = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+function labA(r, g, b) {
+  const R = LIN[r], G = LIN[g], B = LIN[b];
+  return 500 * (fLab((0.412453 * R + 0.357580 * G + 0.180423 * B) / 0.950456) - fLab(0.212671 * R + 0.715160 * G + 0.072169 * B));
+}
+function measure() {
+  const z = targetArea(); if (!z) return null;
+  box.width = 96; box.height = 48;
+  bctx.drawImage(video, z.x, z.y, z.w, z.h, 0, 0, 96, 48);
+  const d = bctx.getImageData(0, 0, 96, 48).data, n = 96 * 48, grey = new Float32Array(n);
+  let sum = 0, burnt = 0, aMid = 0, aTop = 0, aBottom = 0;
+  for (let k = 0, p = 0; p < n; p++, k += 4) {
+    const r = d[k], g = d[k + 1], b = d[k + 2], l = 0.299 * r + 0.587 * g + 0.114 * b;
+    grey[p] = l; sum += l;
+    if (r > 250 || g > 250 || b > 250) burnt++;
+    const a = labA(r, g, b), y = (p / 96) | 0, x = p % 96;
+    if (y < 8) aTop += a; else if (y >= 40) aBottom += a;
+    else if (y >= 12 && y < 36 && x >= 24 && x < 72) aMid += a;
+  }
+  aMid /= 24 * 48; aTop /= 8 * 96; aBottom /= 8 * 96;
+  let sharp = 0;                                        // mean absolute Laplacian
+  for (let y = 1; y < 47; y++) for (let x = 1; x < 95; x++) {
+    const p = y * 96 + x; sharp += Math.abs(4 * grey[p] - grey[p - 1] - grey[p + 1] - grey[p - 96] - grey[p + 96]);
+  }
+  let moving = 0;
+  if (previous) { for (let p = 0; p < n; p++) moving += Math.abs(grey[p] - previous[p]); moving /= n; }
+  previous = grey;
+  return { light: sum / n, glare: burnt / n, contrast: aMid - (aTop + aBottom) / 2,
+           pinkTop: aTop - aMid, pinkBottom: aBottom - aMid, sharpness: sharp / (94 * 46), moving };
+}
+// Average of the last 4 measures (about 0.6 s): one noisy frame no longer flips the verdict.
+// Movement stays instantaneous, it is already a difference between two frames.
+function smooth(m) {
+  if (!m) return null;
+  recent.push(m); if (recent.length > 4) recent.shift();
+  const avg = k => recent.reduce((s, x) => s + x[k], 0) / recent.length;
+  return { light: avg('light'), glare: avg('glare'), contrast: avg('contrast'), pinkTop: avg('pinkTop'),
+           pinkBottom: avg('pinkBottom'), sharpness: avg('sharpness'), moving: m.moving };
+}
+function problem(m) {
+  if (!m) return 'Opening the camera…';
+  // Contrast ≥ 3 accepts 93% of well-framed conjunctivas and 8% of skin alone.
+  if (m.light < 30) return 'Too dark: face a window or turn on the light';
+  if (m.light > 225 || m.glare > 0.12) return 'Too much light or a reflection: turn slightly';
+  if (m.moving > 14) return 'Hold still…';
+  // Hysteresis: 3 to become "visible", but it stays visible down to 2, so noise around 3 does not blink.
+  pinkSeen = m.contrast >= (pinkSeen ? 2 : 3);
+  if (!pinkSeen) {
+    if (m.pinkTop > 3) return 'The pink part is too high in the oval: move it to the middle';
+    if (m.pinkBottom > 3) return 'The pink part is too low in the oval: move it to the middle';
+    return 'The pink inner part is not visible: pull the lower eyelid down';
+  }
+  if (m.sharpness < 2) return 'The image is blurry: move the phone a little further away';
+  return '';
+}
+function hint(text, ok) { $('hint').textContent = text; $('hint').classList.toggle('ok', !!ok); $('guide').classList.toggle('ok', !!ok); }
+function guide() {
+  stopGuide(); ready = 0; bad = 0; previous = null; recent = []; pinkSeen = false; openedAt = Date.now(); $('shoot').hidden = true;
+  timer = setInterval(() => {
+    if (busy) return;
+    const p = problem(smooth(measure()));
+    if (Date.now() - openedAt > 7000) $('shoot').hidden = false;   // manual button if guidance gets stuck
+    // A webcam keeps adjusting its exposure: one bad frame must not cancel a countdown,
+    // only a problem that lasts (3 checks in a row, about half a second).
+    if (p) { bad++; if (!counting || bad >= 3) { ready = 0; hint(p); } return; }
+    bad = 0; ready++;
+    if (!counting) hint('Perfect, hold still', true);
+    if (ready >= 4 && !counting) countdown();                      // about 0.6 s in a row without a problem
+  }, 150);
+}
+function stopGuide() { clearInterval(timer); timer = null; }
+async function countdown() {
+  counting = true; const c = $('count'); c.hidden = false;
+  for (let i = 3; i > 0; i--) {
+    c.textContent = i;
+    for (let t = 0; t < 7; t++) {                                // 0.7 s per digit, still watching the image
+      await new Promise(r => setTimeout(r, 100));
+      if (ready === 0 || !timer) { c.hidden = true; counting = false; return; }   // moved: wait again
+    }
+  }
+  c.hidden = true; counting = false;
+  capture();
+}
+// Three photos 0.25 s apart, then the median. On 90 series of the cohort, a* varies by 1.1 (SD) from one
+// photo to the next against 4.0 between patients (ICC 0.93); two single photos give the same colour in 83%
+// of cases, two medians of 3 in 91%. Median rather than mean: one failed photo (blink, glare) does not move it.
+async function capture() {
+  if (busy) return; busy = true; stopGuide(); hint('Hold still…', true);
+  const blobs = [];
+  for (let i = 0; i < 3; i++) {
+    if (i) await new Promise(r => setTimeout(r, 250));
+    const c = document.createElement('canvas');                 // full resolution, unmirrored
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0);
+    blobs.push(await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92)));
+  }
+  // Photos taken: close the camera right away, the patient can let go of the eyelid.
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('hint').textContent = ''; $('hint').classList.remove('ok'); $('done').hidden = false; $('controls').hidden = true;
+  analyse(blobs);
+}
+// Keeps the photo with the median a*, so its image, probability and colour stay consistent. With two valid
+// photos, keeps the more cautious one (higher probability): this is screening. `stable` says whether all
+// photos give the same colour.
+function combine(results) {
+  const ok = results.filter(r => r && r.ok && typeof r.a_norm === 'number');
+  if (!ok.length) return results.find(r => r && r.error && r.error !== 'Server unreachable') || results[0];
+  ok.sort((a, b) => a.a_norm - b.a_norm);
+  const pick = ok.length === 2 ? (ok[0].probability >= ok[1].probability ? ok[0] : ok[1]) : ok[(ok.length - 1) / 2 | 0];
+  const levels = ['green', 'orange', 'red'].filter(n => ok.some(r => r.triage === n));
+  return { ...pick, n_photos: ok.length, stable: levels.length === 1, levels };
+}
+
+$('shoot').onclick = capture;
+$('choose').onclick = () => $('file').click();
+$('file').onchange = e => { const f = e.target.files[0]; if (f) { stopCamera(); $('camera').hidden = true; $('controls').hidden = true; busy = true; analyse([f]); } e.target.value = ''; };
+
+async function analyse(blobs) {
+  out.hidden = false; const results = [];
+  for (const [i, blob] of blobs.entries()) {
+    out.textContent = blobs.length > 1 ? `Analysing photo ${i + 1} of ${blobs.length}…` : 'Analysing…';
+    const body = new FormData(); body.append('file', blob, 'eye.jpg');
+    try { results.push(await (await fetch('/api/predict', { method: 'POST', body })).json()); }
+    catch (x) { results.push({ ok: false, error: 'Server unreachable' }); }
+  }
+  const r = combine(results);
+  $('camera').hidden = true; out.replaceChildren();
+  if (!r.ok) {
+    const e = document.createElement('div'); e.className = 'verdict'; e.textContent = r.error || 'Analysis failed';
+    out.append(e);
+  } else {
+    const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+    const [name, advice] = LEVEL[r.triage], p = Math.min(Math.max(r.probability, 0), 1);
+    const gauge = el('div', 'gauge'), legend = el('div', 'legend');
+    for (const [c, w, word] of [['green', 40, 'low'], ['orange', 25, 'moderate'], ['red', 35, 'high']]) {
+      const s = el('span', 'seg ' + c); s.style.width = w + '%'; gauge.append(s);
+      const l = el('span', null, word); l.style.width = w + '%'; legend.append(l);
+    }
+    const mark = el('div', 'mark'); mark.style.left = (p * 100) + '%'; gauge.append(mark);
+    const m = el('dl', 'measures');
+    m.append(el('dt', null, 'Estimated probability'), el('dd', null, Math.round(p * 100) + ' %'),
+             el('dt', null, 'Conjunctiva colour (a*)'), el('dd', null, r.a_norm.toFixed(1)),
+             el('dd', 'explain', "a* measures how red the inner eyelid is, corrected by the person's own skin. "
+                                + 'The lower it is, the paler the eyelid, which is a sign of anemia.'));
+    const img = new Image(); img.alt = 'Analysed area: conjunctiva in green, skin reference in blue';
+    img.src = 'data:image/jpeg;base64,' + r.overlay;
+    out.append(el('div', 'small', 'Anemia risk'), el('div', 'verdict ' + r.triage, name), el('div', null, advice),
+               gauge, legend);
+    // The photos fall in different levels: the person is close to a threshold. Said as for a blood result at
+    // the limit, without casting doubt on the measure.
+    if (r.stable === false && r.levels) {
+      const word = { green: 'low', orange: 'moderate', red: 'high' }, l = r.levels;
+      out.append(el('div', null, `Your result is close to the limit between "${word[l[0]]}" and "${word[l[l.length - 1]]}": `
+        + 'a blood test will settle it.'));
+    }
+    out.append(m, img, el('div', 'small', 'Green: the area measured. Blue: the skin used as reference.'),
+               el('div', 'small', 'Research demo, not a diagnosis: only a blood test measures hemoglobin. Pregnant women '
+                                 + 'and anyone with warning signs (breathlessness, fainting) need a blood test whatever the result.'));
+  }
+  const again = document.createElement('button'); again.className = 'main'; again.type = 'button';
+  again.textContent = r.ok ? 'Take another photo' : 'Try again';
+  again.onclick = () => { out.hidden = true; busy = false; if ($('fallback').hidden) openCamera(); else $('file').click(); };
+  out.append(again);
+}
+
+openCamera();
+</script>
+</body>
+</html>

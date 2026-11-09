@@ -1,0 +1,13 @@
+weights/
+__pycache__/
+*.pyc
+.DS_Store
+# Never commit patient photos or patient-level data
+data/
+*.csv
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.pem
+.venv/
